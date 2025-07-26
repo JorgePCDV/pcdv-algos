@@ -1,136 +1,105 @@
-import pandas as pd
-import numpy as np
-import datetime
 import time
+import datetime
 import oandapyV20
-import oandapyV20.endpoints.instruments as instruments
 import oandapyV20.endpoints.orders as orders
-import oandapyV20.endpoints.accounts as accounts
+import oandapyV20.endpoints.instruments as instruments
+import pandas as pd
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
 
-# === CONFIGURATION ===
-OANDA_API_KEY = "YOUR_OANDA_API_KEY"
-OANDA_ACCOUNT_ID = "YOUR_OANDA_ACCOUNT_ID"
-OANDA_ENV = "practice"  # or "live"
+# === CONFIG ===
+API_KEY_PRACTICE = "YOUR_OANDA_PRACTICE_API_KEY"
+API_KEY_LIVE = "YOUR_OANDA_LIVE_API_KEY"
+ACCOUNT_ID_PRACTICE = "YOUR_PRACTICE_ACCOUNT_ID"
+ACCOUNT_ID_LIVE = "YOUR_LIVE_ACCOUNT_ID"
+USE_PAPER = True  # Set False for live trading
+
 INSTRUMENT = "EUR_USD"
-GRANULARITY = "H1"
-UNITS = 1000  # trade size
+UNITS = 1000
+TP_PIPS = 0.0030  # 30 pips
+SL_PIPS = 0.0020  # 20 pips
 
-client = oandapyV20.API(access_token=OANDA_API_KEY)
+ACCOUNT_ID = ACCOUNT_ID_PRACTICE if USE_PAPER else ACCOUNT_ID_LIVE
+API_KEY = API_KEY_PRACTICE if USE_PAPER else API_KEY_LIVE
+client = oandapyV20.API(access_token=API_KEY)
 
-last_candle_time = None  # track last candle time to prevent duplicate trades
-
-# === INDICATOR CALCULATION ===
-def calculate_indicators(df):
-    df['ma20'] = df['close'].rolling(window=20).mean()
-    df['stddev'] = df['close'].rolling(window=20).std()
-    df['upper_bb'] = df['ma20'] + (2 * df['stddev'])
-    df['lower_bb'] = df['ma20'] - (2 * df['stddev'])
-
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-
-    tr = pd.concat([
-        df['high'] - df['low'],
-        abs(df['high'] - df['close'].shift()),
-        abs(df['low'] - df['close'].shift())
-    ], axis=1).max(axis=1)
-    df['atr'] = tr.rolling(window=14).mean()
-    return df
-
-# === FETCH HISTORICAL DATA ===
-def get_candles():
-    params = {"granularity": GRANULARITY, "count": 200, "price": "M"}
+def fetch_candles():
+    params = {"granularity": "H1", "count": 100, "price": "M"}
     r = instruments.InstrumentsCandles(instrument=INSTRUMENT, params=params)
     client.request(r)
     candles = r.response["candles"]
-    records = [{
-        "time": c["time"],
-        "open": float(c["mid"]["o"]),
-        "high": float(c["mid"]["h"]),
-        "low": float(c["mid"]["l"]),
-        "close": float(c["mid"]["c"]),
-        "volume": c["volume"]
-    } for c in candles if c["complete"]]
-    df = pd.DataFrame(records)
-    df["time"] = pd.to_datetime(df["time"])
-    df.set_index("time", inplace=True)
-    return calculate_indicators(df)
+    prices = [float(c["mid"]["c"]) for c in candles]
+    df = pd.DataFrame(prices, columns=["close"])
+    return df
 
-# === SIGNAL GENERATION ===
-def generate_signal(df):
-    last = df.iloc[-1]
-    if last['close'] < last['lower_bb'] and last['rsi'] < 30:
-        return "buy", last['atr']
-    elif last['close'] > last['upper_bb'] and last['rsi'] > 70:
-        return "sell", last['atr']
+def get_signal():
+    df = fetch_candles()
+    rsi = RSIIndicator(close=df["close"], window=14).rsi()
+    bb = BollingerBands(close=df["close"], window=20, window_dev=2)
+    last_rsi = rsi.iloc[-1]
+    last_price = df["close"].iloc[-1]
+    lower_bb = bb.bollinger_lband().iloc[-1]
+    upper_bb = bb.bollinger_hband().iloc[-1]
+
+    print(f"RSI: {last_rsi:.2f} | Price: {last_price:.5f} | BB Low: {lower_bb:.5f} | BB High: {upper_bb:.5f}")
+
+    if last_rsi < 30 and last_price < lower_bb:
+        return "buy", last_price
+    elif last_rsi > 70 and last_price > upper_bb:
+        return "sell", last_price
     return None, None
 
-# === PLACE ORDER ===
-def place_order(signal, atr):
-    stop_loss_pips = round(1.5 * atr, 5)
-    price = get_latest_price()
-    sl_price = None
-    tp_price = None
+def place_order(signal, price):
+    sl = price - SL_PIPS if signal == "buy" else price + SL_PIPS
+    tp = price + TP_PIPS if signal == "buy" else price - TP_PIPS
     units = UNITS if signal == "buy" else -UNITS
 
-    if signal == "buy":
-        sl_price = round(price - stop_loss_pips, 5)
-        tp_price = round(price + (price - sl_price), 5)
-    else:
-        sl_price = round(price + stop_loss_pips, 5)
-        tp_price = round(price - (sl_price - price), 5)
-
-    data = {
+    order_data = {
         "order": {
             "instrument": INSTRUMENT,
             "units": str(units),
             "type": "MARKET",
             "positionFill": "DEFAULT",
-            "stopLossOnFill": {"price": str(sl_price)},
-            "takeProfitOnFill": {"price": str(tp_price)},
+            "stopLossOnFill": {"price": f"{sl:.5f}"},
+            "takeProfitOnFill": {"price": f"{tp:.5f}"}
         }
     }
-    r = orders.OrderCreate(accountID=OANDA_ACCOUNT_ID, data=data)
-    client.request(r)
-    print(f"Trade executed: {signal.upper()} | Entry: {price} | SL: {sl_price} | TP: {tp_price}")
 
-def get_latest_price():
-    r = instruments.InstrumentsCandles(instrument=INSTRUMENT, params={"granularity": GRANULARITY, "count": 1})
+    r = orders.OrderCreate(accountID=ACCOUNT_ID, data=order_data)
     client.request(r)
-    c = r.response["candles"][-1]
-    return float(c["mid"]["c"])
+    print(f"{signal.upper()} order placed at {price:.5f}, SL={sl:.5f}, TP={tp:.5f}")
 
 def wait_until_next_hour():
-    """Sleep until the start of the next full UTC hour."""
     now = datetime.datetime.utcnow()
     next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     sleep_seconds = (next_hour - now).total_seconds()
-    print(f"Sleeping for {int(sleep_seconds)} seconds until next hour...")
+    print(f"Sleeping {int(sleep_seconds)} seconds until next full hour...")
     time.sleep(sleep_seconds)
 
 def run_strategy():
-    global last_candle_time
+    last_candle_time = None
 
     while True:
         try:
-            df = get_candles()
-            latest_time = df.index[-1].replace(minute=0, second=0, microsecond=0)
+            df = fetch_candles()
+            latest_candle_time = df.index[-1] if hasattr(df.index, "__len__") else None
+            latest_candle_time = df.index[-1].replace(minute=0, second=0, microsecond=0) if hasattr(df.index, "__len__") else None
+
+            # If index not datetime, fallback to UTC now hour:
+            if latest_candle_time is None or not isinstance(latest_candle_time, pd.Timestamp):
+                latest_candle_time = datetime.datetime.utcnow().replace(minute=0, second=0, microsecond=0)
 
             if last_candle_time is None:
-                last_candle_time = latest_time
-                print(f"Starting fresh at {latest_time} UTC. No trade yet.")
-            elif latest_time > last_candle_time:
-                print(f"[{datetime.datetime.utcnow()} UTC] New candle detected: {latest_time}")
-                signal, atr = generate_signal(df)
+                last_candle_time = latest_candle_time
+                print(f"[{datetime.datetime.utcnow()} UTC] Starting fresh at candle {last_candle_time}")
+            elif latest_candle_time > last_candle_time:
+                print(f"[{datetime.datetime.utcnow()} UTC] New candle detected: {latest_candle_time}")
+                signal, price = get_signal()
                 if signal:
-                    print(f"Signal: {signal.upper()} | ATR: {atr}")
-                    place_order(signal, atr)
+                    place_order(signal, price)
                 else:
                     print("No trade signal.")
-                last_candle_time = latest_time
+                last_candle_time = latest_candle_time
             else:
                 print(f"[{datetime.datetime.utcnow()} UTC] No new candle yet (last: {last_candle_time})")
 
