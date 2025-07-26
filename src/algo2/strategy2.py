@@ -101,9 +101,19 @@ def get_latest_price():
     c = r.response["candles"][-1]
     return float(c["mid"]["c"])
 
+def wait_until_next_hour():
+    """Sleep until the start of the next full UTC hour."""
+    now = datetime.datetime.utcnow()
+    next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    sleep_seconds = (next_hour - now).total_seconds()
+    print(f"Sleeping for {int(sleep_seconds)} seconds until next hour...")
+    time.sleep(sleep_seconds)
+
 def run_strategy():
     while True:
-        print(f"Running strategy at {datetime.datetime.utcnow()} UTC")
+        now = datetime.datetime.utcnow()
+        print(f"[{now}] Running strategy...")
+
         try:
             df = get_candles()
             signal, atr = generate_signal(df)
@@ -115,9 +125,8 @@ def run_strategy():
         except Exception as e:
             print(f"Error: {e}")
 
-        print("Sleeping for 1 hour...\n")
-        time.sleep(3600)  # sleep for 1 hour (3600 seconds)
+        # Sleep until next full hour
+        wait_until_next_hour()
 
-# Start the loop
 if __name__ == "__main__":
     run_strategy()
