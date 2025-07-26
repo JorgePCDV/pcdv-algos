@@ -13,6 +13,7 @@ API_KEY_LIVE = "YOUR_OANDA_LIVE_API_KEY"
 ACCOUNT_ID_PRACTICE = "YOUR_PRACTICE_ACCOUNT_ID"
 ACCOUNT_ID_LIVE = "YOUR_LIVE_ACCOUNT_ID"
 USE_PAPER = True  # Set False for live trading
+RUN_BACKTEST = False  # Set True to run backtest instead of live trading
 
 INSTRUMENT = "EUR_USD"
 UNITS = 1000
@@ -108,5 +109,82 @@ def run_strategy():
 
         time.sleep(60)  # check every minute
 
+# --------------- BACKTESTING FUNCTIONS ------------------
+
+def run_backtest(csv_file="EURUSD_1H.csv"):
+    print("Running backtest...")
+
+    df = pd.read_csv(csv_file, parse_dates=["time"], index_col="time")
+
+    df["rsi"] = RSIIndicator(close=df["close"], window=14).rsi()
+    bb = BollingerBands(close=df["close"], window=20, window_dev=2)
+    df["bb_low"] = bb.bollinger_lband()
+    df["bb_high"] = bb.bollinger_hband()
+
+    df["position"] = 0  # 1 = long, -1 = short, 0 = flat
+    df["entry_price"] = 0.0
+    df["exit_price"] = 0.0
+    df["profit"] = 0.0
+
+    in_position = False
+    position_type = 0
+    entry_price = 0.0
+
+    for i in range(1, len(df)):
+        if not in_position:
+            if df["rsi"].iloc[i] < 30 and df["close"].iloc[i] < df["bb_low"].iloc[i]:
+                in_position = True
+                position_type = 1
+                entry_price = df["close"].iloc[i]
+                df.at[df.index[i], "position"] = 1
+                df.at[df.index[i], "entry_price"] = entry_price
+            elif df["rsi"].iloc[i] > 70 and df["close"].iloc[i] > df["bb_high"].iloc[i]:
+                in_position = True
+                position_type = -1
+                entry_price = df["close"].iloc[i]
+                df.at[df.index[i], "position"] = -1
+                df.at[df.index[i], "entry_price"] = entry_price
+        else:
+            current_price = df["close"].iloc[i]
+
+            if position_type == 1:
+                tp_price = entry_price + TP_PIPS
+                sl_price = entry_price - SL_PIPS
+                if current_price >= tp_price:
+                    df.at[df.index[i], "exit_price"] = tp_price
+                    df.at[df.index[i], "profit"] = tp_price - entry_price
+                    in_position = False
+                    position_type = 0
+                elif current_price <= sl_price:
+                    df.at[df.index[i], "exit_price"] = sl_price
+                    df.at[df.index[i], "profit"] = sl_price - entry_price
+                    in_position = False
+                    position_type = 0
+
+            elif position_type == -1:
+                tp_price = entry_price - TP_PIPS
+                sl_price = entry_price + SL_PIPS
+                if current_price <= tp_price:
+                    df.at[df.index[i], "exit_price"] = tp_price
+                    df.at[df.index[i], "profit"] = entry_price - tp_price
+                    in_position = False
+                    position_type = 0
+                elif current_price >= sl_price:
+                    df.at[df.index[i], "exit_price"] = sl_price
+                    df.at[df.index[i], "profit"] = entry_price - sl_price
+                    in_position = False
+                    position_type = 0
+
+    total_profit = df["profit"].sum() * 10000
+    print(f"Total profit over backtest period: {total_profit:.2f} pips")
+
+    df.to_csv("backtest_results.csv")
+    print("Backtest results saved to 'backtest_results.csv'")
+
+# ------------------- MAIN -------------------
+
 if __name__ == "__main__":
-    run_strategy()
+    if RUN_BACKTEST:
+        run_backtest()
+    else:
+        run_live_strategy()
