@@ -17,6 +17,8 @@ UNITS = 1000  # trade size
 
 client = oandapyV20.API(access_token=OANDA_API_KEY)
 
+last_candle_time = None  # track last candle time to prevent duplicate trades
+
 # === INDICATOR CALCULATION ===
 def calculate_indicators(df):
     df['ma20'] = df['close'].rolling(window=20).mean()
@@ -110,23 +112,32 @@ def wait_until_next_hour():
     time.sleep(sleep_seconds)
 
 def run_strategy():
-    while True:
-        now = datetime.datetime.utcnow()
-        print(f"[{now}] Running strategy...")
+    global last_candle_time
 
+    while True:
         try:
             df = get_candles()
-            signal, atr = generate_signal(df)
-            if signal:
-                print(f"Signal: {signal.upper()} | ATR: {atr}")
-                place_order(signal, atr)
+            latest_time = df.index[-1].replace(minute=0, second=0, microsecond=0)
+
+            if last_candle_time is None:
+                last_candle_time = latest_time
+                print(f"Starting fresh at {latest_time} UTC. No trade yet.")
+            elif latest_time > last_candle_time:
+                print(f"[{datetime.datetime.utcnow()} UTC] New candle detected: {latest_time}")
+                signal, atr = generate_signal(df)
+                if signal:
+                    print(f"Signal: {signal.upper()} | ATR: {atr}")
+                    place_order(signal, atr)
+                else:
+                    print("No trade signal.")
+                last_candle_time = latest_time
             else:
-                print("No trade signal.")
+                print(f"[{datetime.datetime.utcnow()} UTC] No new candle yet (last: {last_candle_time})")
+
         except Exception as e:
             print(f"Error: {e}")
 
-        # Sleep until next full hour
-        wait_until_next_hour()
+        time.sleep(60)  # check every minute
 
 if __name__ == "__main__":
     run_strategy()
