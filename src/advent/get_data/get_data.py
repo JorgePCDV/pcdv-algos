@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-
 def get_stock_data(tickers, start, end):
     data = {}
 
@@ -20,6 +19,27 @@ def get_stock_data(tickers, start, end):
 
     return data
 
+def plot(data, ticker):
+    fig = go.Figure()
+
+    fig.add_trace(go.Candlestick(
+        x=data.index,
+        open=data["Open"],
+        high=data["High"],
+        low=data["Low"],
+        close=data["Close"],
+        name="Price"
+    ))
+
+    fig.update_layout(
+        title=f"{ticker} Stock Analysis",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis=dict(rangeslider=dict(visible=False))
+    )
+
+    fig.show()
+
 if __name__ == "__main__":
     tickers = ["AAPL", "GOOG", "MSFT"]
     start = "2023-01-01"
@@ -28,4 +48,4 @@ if __name__ == "__main__":
     stock_data = get_stock_data(tickers=tickers, start=start, end=end)
 
     for ticker, data in stock_data.items():
-        print(data.head())
+        plot(data, ticker)
