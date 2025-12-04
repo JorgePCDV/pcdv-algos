@@ -25,4 +25,7 @@ if __name__ == "__main__":
     start = "2023-01-01"
     end = "2024-11-01"
 
-    print("tickers: {}, start: {}, end: {}".format(tickers, start, end))
+    stock_data = get_stock_data(tickers=tickers, start=start, end=end)
+
+    for ticker, data in stock_data.items():
+        print(data.head())
