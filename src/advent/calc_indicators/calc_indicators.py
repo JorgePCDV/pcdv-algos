@@ -44,6 +44,20 @@ def add_moving_average_strategy(data, short_window=20, long_window=50):
 
     return data
 
+def calculate_indicators(data):
+    delta = data["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    data["RSI"] = 100 - (100 / (1 + rs))
+
+    data["MA_20"] = data["Close"].rolling(window=20).mean()
+    data["Upper_Band"] = data["MA_20"] + 2 * data["Close"].rolling(window=20).std()
+    data["Lower_Band"] = data["MA_20"] - 2 * data["Close"].rolling(window=20).std()
+
+    data = data.dropna()
+    return data
+
 def plot(data, ticker):
     fig = go.Figure()
 
@@ -130,4 +144,5 @@ if __name__ == "__main__":
 
     for ticker, data in stock_data.items():
         data = add_moving_average_strategy(data)
-        print(data.head())
+        data = calculate_indicators(data)
+        plot_with_strategy(data, ticker)
