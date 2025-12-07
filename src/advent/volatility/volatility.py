@@ -73,15 +73,6 @@ def calculate_indicators(data):
     data = data.dropna()
     return data
 
-def calculate_volatility(data):
-    data["log_returns"] = np.log(data["Close"].shift(1))
-    data["Rolling_Std"] = data["log_returns"].rolling(window=20).std()
-    data["EWMA_Std"] = data["Rolling_Std"].ewm(span=20).std()
-    data["Annualized_Vol"] = data["Rolling_Std"] * np.sqrt(252)
-
-    data = data.dropna()
-    return data
-
 def plot(data, ticker):
     fig = go.Figure()
 
@@ -106,10 +97,10 @@ def plot(data, ticker):
 
 def plot_with_strategy(data, ticker):
     fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
+        rows=3, cols=1, shared_xaxes=True,
         vertical_spacing=0.02,
-        row_heights=[0.7, 0.3],
-        subplot_titles=("Candlestick Chart", "RSI")
+        row_heights=[0.6, 0.2, 0.2],
+        subplot_titles=("Candlestick Chart", "RSI", "Volatility")
     )
 
     # Candlestick chart
@@ -147,6 +138,11 @@ def plot_with_strategy(data, ticker):
         line=dict(dash='dash', color='green'), name='Oversold'
     ), row=2, col=1)
 
+    # Volatility
+    fig.add_trace(go.Scatter(x=data.index, y=data['Rolling_Std'], mode='lines', name='Rolling Std Dev'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['EWMA_Std'], mode='lines', name='EWMA Std Dev'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['Annualized_Vol'], mode='lines', name='Annualized Volatility'), row=3, col=1)
+
     fig.update_layout(
         title=f"{ticker} Stock Analysis",
         xaxis=dict(rangeslider=dict(visible=False)),
@@ -159,6 +155,15 @@ def plot_with_strategy(data, ticker):
 
     fig.show()
 
+def calculate_volatility(data):
+    data["log_returns"] = np.log(data["Close"].shift(1))
+    data["Rolling_Std"] = data["log_returns"].rolling(window=20).std()
+    data["EWMA_Std"] = data["Rolling_Std"].ewm(span=20).std()
+    data["Annualized_Vol"] = data["Rolling_Std"] * np.sqrt(252)
+
+    data = data.dropna()
+    return data
+
 if __name__ == "__main__":
     tickers = ["AAPL", "GOOG", "MSFT"]
     start = "2023-01-01"
@@ -170,5 +175,4 @@ if __name__ == "__main__":
         data = add_moving_average_strategy(data)
         data = calculate_indicators(data)
         data = calculate_volatility(data)
-        print(data.head)
-        # plot_with_strategy(data, ticker)
+        plot_with_strategy(data, ticker)
