@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from instruments.european_call import EuropeanCall
-from monte_carlo.simulator import simulate_terminal_prices
+from src.pricing.instruments.european_call import EuropeanCall
+from src.pricing.monte_carlo.simulator import simulate_terminal_prices
 
 
 @dataclass(frozen=True)
@@ -15,11 +15,10 @@ class MonteCarloResult:
 
 
 def price(
-    instrument: EuropeanCall,
-    n_simulations: int = 100_000,
-    seed: int | None = None,
+        instrument: EuropeanCall,
+        n_simulations: int = 100_000,
+        seed: int | None = None,
 ) -> MonteCarloResult:
-
     terminal_prices = simulate_terminal_prices(
         spot=instrument.spot,
         maturity=instrument.maturity,
@@ -35,8 +34,8 @@ def price(
     )
 
     discounted_payoffs = (
-        np.exp(-instrument.rate * instrument.maturity)
-        * payoffs
+            np.exp(-instrument.rate * instrument.maturity)
+            * payoffs
     )
 
     price_estimate = float(np.mean(discounted_payoffs))
